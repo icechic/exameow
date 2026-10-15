@@ -1,0 +1,78 @@
+name: iOS Unsigned IPA
+
+# Builds an unsigned iOS .ipa for sideloading (Sideloadly / AltStore).
+# Manual trigger only: Actions -> "iOS Unsigned IPA" -> Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install Rust with iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read app version
+        id: appver
+        run: echo "version=$(node -p "require('./src-tauri/tauri.conf.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Init iOS project
+        run: pnpm tauri ios init --ci
+
+      - name: Generate app icons
+        run: pnpm tauri icon src-tauri/icons/icon.png
+
+      - name: Build unsigned IPA
+        run: pnpm tauri ios build --no-sign --target aarch64
+
+      - name: Collect IPA
+        run: |
+          set -euo pipefail
+          IPA=$(find src-tauri -name '*.ipa' -type f -not -path '*/node_modules/*' | head -n 1)
+          if [ -z "$IPA" ]; then
+            echo "::error::IPA not found"
+            find src-tauri/gen/apple -maxdepth 5 -type d 2>/dev/null | head -n 40 || true
+            exit 1
+          fi
+          echo "IPA: $IPA"
+          mkdir -p dist
+          cp "$IPA" "dist/Exameow-v${{ steps.appver.outputs.version }}-unsigned.ipa"
+          ls -lh dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Exameow-v${{ steps.appver.outputs.version }}-unsigned-ipa
+          path: dist/*.ipa
+          if-no-files-found: error
