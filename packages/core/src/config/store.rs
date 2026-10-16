@@ -176,6 +176,23 @@ fn dirs_next() -> Option<PathBuf> {
             return Some(PathBuf::from(home).join(".config"));
         }
     }
+    #[cfg(target_os = "ios")]
+    {
+        // iOS app sandbox: $HOME/Library/Application Support
+        if let Ok(home) = std::env::var("HOME") {
+            if !home.is_empty() {
+                return Some(PathBuf::from(home).join("Library").join("Application Support"));
+            }
+        }
+        // Fallback: every iOS app gets TMPDIR (<container>/tmp) even when HOME is unset.
+        if let Ok(tmp) = std::env::var("TMPDIR") {
+            let tmp = PathBuf::from(tmp);
+            if let Some(container) = tmp.parent() {
+                return Some(container.join("Library").join("Application Support"));
+            }
+            return Some(tmp);
+        }
+    }
     #[cfg(target_os = "android")]
     {
         if let Ok(home) = std::env::var("HOME") {
